@@ -1,18 +1,24 @@
+-- SPEAKER (Rayfield GUI + GitHub API)
+
 local HttpService = game:GetService("HttpService")
 local request     = http_request or request or (syn and syn.request)
 assert(request, "No HTTP request function found")
 
--- Base64 encode (pure Lua)
+-- pure-Lua Base64 encode
 local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 local function base64encode(data)
     return ((data:gsub('.', function(x)
         local r,bits='', x:byte()
-        for i=8,1,-1 do r=r..(bits%2^i-bits%2^(i-1)>0 and '1' or '0') end
+        for i=8,1,-1 do
+            r = r .. (bits % 2^i - bits % 2^(i-1) > 0 and '1' or '0')
+        end
         return r
     end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
-        if #x<6 then return '' end
+        if #x < 6 then return '' end
         local c=0
-        for i=1,6 do c=c + (x:sub(i,i)=='1' and 2^(6-i) or 0) end
+        for i=1,6 do
+            c = c + (x:sub(i,i)=='1' and 2^(6-i) or 0)
+        end
         return b:sub(c+1,c+1)
     end)..({ '', '==', '=' })[#data%3+1])
 end
@@ -42,14 +48,17 @@ local Tab = Window:CreateTab("Remote Control", 4483362458)
 
 -- fetch current SHA
 local function getSHA()
-    local url = API_URL .. "?ref=" .. CONFIG.branch
-    local res = request{ Url=url, Method="GET", Headers={ Authorization="token "..CONFIG.token } }
+    local res = request{
+        Url     = API_URL .. "?ref=" .. CONFIG.branch,
+        Method  = "GET",
+        Headers = { Authorization = "token " .. CONFIG.token },
+    }
     if res.StatusCode == 200 then
         return HttpService:JSONDecode(res.Body).sha
     end
 end
 
--- central sendCommand
+-- send a command
 local function sendCommand(cmdText)
     local payload = HttpService:JSONEncode{ cmd = cmdText, timestamp = tick() }
     local encoded = base64encode(payload)
@@ -67,7 +76,7 @@ local function sendCommand(cmdText)
         Url     = API_URL,
         Method  = "PUT",
         Headers = {
-            Authorization   = "token "..CONFIG.token,
+            Authorization   = "token " .. CONFIG.token,
             ["Content-Type"]= "application/json",
         },
         Body    = body,
@@ -80,7 +89,7 @@ local function sendCommand(cmdText)
     end
 end
 
--- QUICK commands
+-- Quick-button definitions
 local QUICK = {
     { "Kill",    "kill" },
     { "Reset",   "reset" },
@@ -88,7 +97,8 @@ local QUICK = {
     { "Fling",   "fling" },
     { "Trip",    "trip" },
     { "Bring",   function()
-        local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local hrp = game.Players.LocalPlayer.Character and
+                    game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
         local p = hrp.Position
         sendCommand(("bring:%.2f,%.2f,%.2f"):format(p.X,p.Y,p.Z))
@@ -101,7 +111,7 @@ local QUICK = {
 Tab:CreateInput{
     Name                    = "Type command (`kick:reason`)",
     PlaceholderText         = table.concat((function()
-        local t={}
+        local t = {}
         for _,v in ipairs(QUICK) do
             if type(v[2])=="string" then table.insert(t, v[2]) end
         end
@@ -115,7 +125,7 @@ for _,btn in ipairs(QUICK) do
     Tab:CreateButton{
         Name     = "Send "..btn[1],
         Callback = function()
-            if type(btn[2]) == "string" then
+            if type(btn[2])=="string" then
                 sendCommand(btn[2])
             else
                 btn[2]()
