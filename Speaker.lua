@@ -42,8 +42,9 @@ local Tab = Window:CreateTab("Remote Control", 4483362458)
 
 -- fetch current SHA
 local function getSHA()
-    local res = request{ Url=API_URL, Method="GET", Headers={ Authorization="token "..CONFIG.token } }
-    if res.StatusCode==200 then
+    local url = API_URL .. "?ref=" .. CONFIG.branch
+    local res = request{ Url=url, Method="GET", Headers={ Authorization="token "..CONFIG.token } }
+    if res.StatusCode == 200 then
         return HttpService:JSONDecode(res.Body).sha
     end
 end
@@ -66,7 +67,7 @@ local function sendCommand(cmdText)
         Url     = API_URL,
         Method  = "PUT",
         Headers = {
-            Authorization   = "token " .. CONFIG.token,
+            Authorization   = "token "..CONFIG.token,
             ["Content-Type"]= "application/json",
         },
         Body    = body,
@@ -81,21 +82,22 @@ end
 
 -- QUICK commands
 local QUICK = {
-    { "Kill",  "kill" },
-    { "Reset", "reset" },
-    { "Jump",  "jump" },
-    { "Fling", "fling" },
-    { "Kick",  "kick:You have been kicked!" },
-    { "Trip",  "trip" },
-    { "Bring", function()
+    { "Kill",    "kill" },
+    { "Reset",   "reset" },
+    { "Jump",    "jump" },
+    { "Fling",   "fling" },
+    { "Trip",    "trip" },
+    { "Bring",   function()
         local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
-        local pos = hrp.Position
-        sendCommand(("bring:%.2f,%.2f,%.2f"):format(pos.X, pos.Y, pos.Z))
+        local p = hrp.Position
+        sendCommand(("bring:%.2f,%.2f,%.2f"):format(p.X,p.Y,p.Z))
     end },
+    { "Rejoin",  "rejoin" },
+    { "Kick",    "kick:You have been kicked!" },
 }
 
--- UI elements
+-- UI
 Tab:CreateInput{
     Name                    = "Type command (`kick:reason`)",
     PlaceholderText         = table.concat((function()
@@ -113,7 +115,7 @@ for _,btn in ipairs(QUICK) do
     Tab:CreateButton{
         Name     = "Send "..btn[1],
         Callback = function()
-            if type(btn[2])=="string" then
+            if type(btn[2]) == "string" then
                 sendCommand(btn[2])
             else
                 btn[2]()
