@@ -97,10 +97,11 @@ local QUICK = {
     { "Fling",   "fling" },
     { "Trip",    "trip" },
     { "Bring",   function()
-        local hrp = game.Players.LocalPlayer.Character and
-                    game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local pl = game.Players.LocalPlayer
+        local hrp = pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
         local p = hrp.Position
+        -- send as string always
         sendCommand(("bring:%.2f,%.2f,%.2f"):format(p.X,p.Y,p.Z))
     end },
     { "Rejoin",  "rejoin" },
@@ -123,7 +124,7 @@ Tab:CreateInput{
 
 for _,btn in ipairs(QUICK) do
     Tab:CreateButton{
-        Name     = "Send "..btn[1],
+        Name     = "Send " .. btn[1],
         Callback = function()
             if type(btn[2])=="string" then
                 sendCommand(btn[2])
