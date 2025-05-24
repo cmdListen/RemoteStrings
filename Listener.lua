@@ -34,20 +34,20 @@ local CONFIG = {
 local API_URL = ("https://api.github.com/repos/%s/%s/contents/%s")
     :format(CONFIG.owner, CONFIG.repo, CONFIG.path)
 
--- helper to reset remote JSON to none
+-- helper: reset remote JSON to none
 local function resetRemote()
-    -- fetch current sha
-    local sha = request{ Url=API_URL, Method="GET", Headers={ Authorization="token "..CONFIG.token } }
-    if sha.StatusCode~=200 then return end
-    local current = HttpService:JSONDecode(sha.Body).sha
+    local url = API_URL .. "?ref=" .. CONFIG.branch
+    local get = request{ Url=url, Method="GET", Headers={Authorization="token "..CONFIG.token} }
+    if get.StatusCode~=200 then return end
+    local sha = HttpService:JSONDecode(get.Body).sha
 
-    -- write {cmd="none",timestamp=tick()}
     local payload = HttpService:JSONEncode{ cmd="none", timestamp=tick() }
-    local b64     = HttpService:Base64Encode and HttpService:Base64Encode(payload) or error("Need Base64Encode")
-    local body    = HttpService:JSONEncode{
+    local encoded = HttpService:Base64Encode and HttpService:Base64Encode(payload)
+        or error("Need Base64Encode")
+    local body = HttpService:JSONEncode{
         message = "reset cmd",
-        content = b64,
-        sha     = current,
+        content = encoded,
+        sha     = sha,
         branch  = CONFIG.branch,
     }
     request{
@@ -63,99 +63,91 @@ end
 
 -- register commands
 local CommandFunctions = {}
-CommandFunctions["kill"] = function()
-    local c = localPlayer.Character
-    if c and c:FindFirstChild("Humanoid") then
-        c.Humanoid.Health = 0
-    end
+CommandFunctions["kill"]  = function() 
+    local c=localPlayer.Character
+    if c and c:FindFirstChild("Humanoid") then c.Humanoid.Health=0 end
 end
 CommandFunctions["reset"] = function()
-    local c = localPlayer.Character
+    local c=localPlayer.Character
     if c then c:BreakJoints() end
 end
-CommandFunctions["jump"] = function()
-    local c = localPlayer.Character
-    if c and c:FindFirstChild("Humanoid") then
-        c.Humanoid.Jump = true
-    end
+CommandFunctions["jump"]  = function()
+    local c=localPlayer.Character
+    if c and c:FindFirstChild("Humanoid") then c.Humanoid.Jump=true end
 end
 CommandFunctions["fling"] = function()
-    local c = localPlayer.Character
+    local c=localPlayer.Character
     if not c then return end
-    local r = c:FindFirstChild("HumanoidRootPart")
+    local r=c:FindFirstChild("HumanoidRootPart")
     if not r then return end
     local bv=Instance.new("BodyVelocity")
     bv.MaxForce=Vector3.new(1e5,1e5,1e5)
-    bv.Velocity=Vector3.new(
-        math.random(-100,100),
-        math.random(200,300),
-        math.random(-100,100)
-    )
-    bv.Parent = r; Debris:AddItem(bv,0.5)
+    bv.Velocity=Vector3.new(math.random(-100,100),math.random(200,300),math.random(-100,100))
+    bv.Parent=r; Debris:AddItem(bv,0.5)
 end
 CommandFunctions["kick"] = function(reason)
-    game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title="Kicked",
-        Text=reason or"You were kicked",
-        Duration=5,
+    game:GetService("StarterGui"):SetCore("SendNotification",{
+        Title="Kicked", Text=reason or"You were kicked", Duration=5
     })
     wait(5)
     if syn then syn:exit() else pcall(game.Shutdown,game) end
 end
-CommandFunctions["join"] = function(jobId)
-    if jobId and jobId~="" then
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, localPlayer)
-    end
-end
 CommandFunctions["trip"] = function()
-    local c = localPlayer.Character
+    local c=localPlayer.Character
     if not c or not c.PrimaryPart then return end
-    for _, m in ipairs(c:GetDescendants()) do
+    for _,m in ipairs(c:GetDescendants()) do
         if m:IsA("Motor6D") then
-            local a0=Instance.new("Attachment", m.Part0)
-            local a1=Instance.new("Attachment", m.Part1)
-            local s = Instance.new("BallSocketConstraint")
-            s.Attachment0=a0; s.Attachment1=a1; s.Parent=c.PrimaryPart
+            local a0=Instance.new("Attachment",m.Part0)
+            local a1=Instance.new("Attachment",m.Part1)
+            local sock=Instance.new("BallSocketConstraint")
+            sock.Attachment0=a0; sock.Attachment1=a1; sock.Parent=c.PrimaryPart
             m.Enabled=false
         end
     end
-    c.PrimaryPart.Velocity = Vector3.new(0,-50,0)
-    delay(2, function()
+    c.PrimaryPart.Velocity=Vector3.new(0,-50,0)
+    delay(2,function()
         if not c then return end
-        for _, d in ipairs(c:GetDescendants()) do
+        for _,d in ipairs(c:GetDescendants()) do
             if d:IsA("BallSocketConstraint") then d:Destroy()
             elseif d:IsA("Motor6D") then d.Enabled=true end
         end
     end)
 end
 CommandFunctions["bring"] = function(arg)
-    local nums = {}
-    for v in arg:gmatch("[^,]+") do table.insert(nums, tonumber(v)) end
+    local nums={}
+    for v in arg:gmatch("[^,]+") do nums[#nums+1]=tonumber(v) end
     if #nums==3 and localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        localPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(nums[1],nums[2],nums[3])
+        localPlayer.Character.HumanoidRootPart.CFrame=CFrame.new(nums[1],nums[2],nums[3])
     end
+end
+CommandFunctions["join"] = function(jobId)
+    if jobId and jobId~="" then
+        TeleportService:TeleportToPlaceInstance(game.PlaceId,jobId,localPlayer)
+    end
+end
+CommandFunctions["rejoin"] = function()
+    TeleportService:Teleport(game.PlaceId)
 end
 
 -- fetch & execute
-local lastTimestamp = 0
+local lastTimestamp=0
 spawn(function()
     while true do
         local res = request{
-            Url     = API_URL,
+            Url     = API_URL .. "?ref="..CONFIG.branch,
             Method  = "GET",
             Headers = { Authorization="token "..CONFIG.token },
         }
         if res.StatusCode==200 then
             local meta = HttpService:JSONDecode(res.Body)
             local raw  = base64decode(meta.content)
-            local ok, payload = pcall(HttpService.JSONDecode, HttpService, raw)
-            if ok and payload.timestamp and payload.cmd then
-                if payload.timestamp > lastTimestamp then
-                    lastTimestamp = payload.timestamp
-                    local cmd, arg = payload.cmd:lower():match("^([^:]+):?(.*)$")
-                    local fn = CommandFunctions[cmd]
+            local ok,p = pcall(HttpService.JSONDecode, HttpService, raw)
+            if ok and p.timestamp and p.cmd then
+                if p.timestamp>lastTimestamp then
+                    lastTimestamp=p.timestamp
+                    local cmd,arg = p.cmd:lower():match("^([^:]+):?(.*)$")
+                    local fn=CommandFunctions[cmd]
                     if fn then fn(arg~="" and arg or nil) end
-                    -- reset remote JSON
                     resetRemote()
                 end
             end
