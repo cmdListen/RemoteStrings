@@ -1,13 +1,21 @@
--- REFINED SPEAKER (Command Queue GUI)
+-- RE-ENGINEERED SPEAKER (Safe Initialization & Robust Structure)
 
-local HttpService = game:GetService("HttpService")
-local Players     = game:GetService("Players")
-local request     = http_request or request or (syn and syn.request)
-assert(request, "No HTTP request function found")
+--- A more robust, object-oriented structure to prevent conflicts and handle errors.
+local RemoteController = {}
+RemoteController.__index = RemoteController
+
+--- CONFIGURATION
+RemoteController.CONFIG = {
+    token  = "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",
+    owner  = "cmdListen",
+    repo   = "remotecommands",
+    path   = "latest_command.json",
+    branch = "main",
+}
 
 -- pure-Lua Base64 encode
 local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-local function base64encode(data)
+function RemoteController:Base64Encode(data)
     return ((data:gsub('.', function(x)
         local r,bits='', x:byte()
         for i=8,1,-1 do r = r .. (bits % 2^i - bits % 2^(i-1) > 0 and '1' or '0') end
@@ -20,137 +28,129 @@ local function base64encode(data)
     end)..({ '', '==', '=' })[#data%3+1])
 end
 
--- CONFIG
-local CONFIG = {
-    token  = "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",
-    owner  = "cmdListen",
-    repo   = "remotecommands",
-    path   = "latest_command.json",
-    branch = "main",
-}
-local API_URL = ("https://api.github.com/repos/%s/%s/contents/%s")
-    :format(CONFIG.owner, CONFIG.repo, CONFIG.path)
-
--- Rayfield GUI
-local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
-local Window = Rayfield:CreateWindow({ Name = "Speaker Remote Console V2", LoadingTitle = "Initializing" })
-local Tab = Window:CreateTab("Remote Control", 4483362458)
-
--- Helper function to update the remote file
-local function updateRemoteFile(payloadObject, message)
-    -- 1. Get the current file SHA
-    local getRes = request({ Url = API_URL .. "?ref=" .. CONFIG.branch, Method = "GET", Headers = { Authorization = "token " .. CONFIG.token } })
+--- Internal function to update the remote file on GitHub
+function RemoteController:_updateRemoteFile(payloadObject, message)
+    local apiUrl = ("https://api.github.com/repos/%s/%s/contents/%s"):format(self.CONFIG.owner, self.CONFIG.repo, self.CONFIG.path)
+    
+    local getRes = self.request({ Url = apiUrl .. "?ref=" .. self.CONFIG.branch, Method = "GET", Headers = { Authorization = "token " .. self.CONFIG.token } })
     if getRes.StatusCode ~= 200 then
-        Rayfield:Notify({ Title="Error", Content="Could not fetch file SHA. Check token/repo.", Duration=5 })
+        self.Rayfield:Notify({ Title="Error", Content="Could not fetch file SHA.", Duration=5 })
         return false
     end
-    local sha = HttpService:JSONDecode(getRes.Body).sha
+    local sha = self.HttpService:JSONDecode(getRes.Body).sha
 
-    -- 2. Prepare the new content
-    local jsonPayload = HttpService:JSONEncode(payloadObject)
-    local encodedContent = base64encode(jsonPayload)
+    local jsonPayload = self.HttpService:JSONEncode(payloadObject)
+    local encodedContent = self:Base64Encode(jsonPayload)
     
-    local body = HttpService:JSONEncode({
-        message = message,
-        content = encodedContent,
-        sha     = sha,
-        branch  = CONFIG.branch,
+    local body = self.HttpService:JSONEncode({
+        message = message, content = encodedContent, sha = sha, branch = self.CONFIG.branch,
     })
 
-    -- 3. Send the PUT request to update the file
-    local putRes = request({
-        Url = API_URL, Method = "PUT",
-        Headers = { Authorization = "token " .. CONFIG.token, ["Content-Type"] = "application/json" },
+    local putRes = self.request({
+        Url = apiUrl, Method = "PUT",
+        Headers = { Authorization = "token " .. self.CONFIG.token, ["Content-Type"] = "application/json" },
         Body = body,
     })
 
-    if putRes.StatusCode >= 200 and putRes.StatusCode < 300 then
-        return true
-    else
-        Rayfield:Notify({ Title="Error", Content="GitHub PUT failed: " .. putRes.StatusMessage, Duration=5 })
-        return false
-    end
+    return putRes.StatusCode >= 200 and putRes.StatusCode < 300
 end
 
--- Function to add a command to the remote queue
-local function queueCommand(cmdText)
-    -- 1. Fetch the current command list
-    local getRes = request({ Url = API_URL .. "?ref=" .. CONFIG.branch, Method = "GET", Headers = { Authorization = "token " .. CONFIG.token } })
+--- Public function to add a command to the remote queue
+function RemoteController:QueueCommand(cmdText)
+    local apiUrl = ("https://api.github.com/repos/%s/%s/contents/%s"):format(self.CONFIG.owner, self.CONFIG.repo, self.CONFIG.path)
+    local getRes = self.request({ Url = apiUrl .. "?ref=" .. self.CONFIG.branch, Method = "GET", Headers = { Authorization = "token " .. self.CONFIG.token } })
     if getRes.StatusCode ~= 200 then
-        Rayfield:Notify({ Title="Error", Content="Failed to get current command list.", Duration=5 })
+        self.Rayfield:Notify({ Title="Error", Content="Failed to get command list.", Duration=5 })
         return
     end
     
-    local b64content = HttpService:JSONDecode(getRes.Body).content
-    local rawJson = (loadstring(return (game:GetService("HttpService"):JSONDecode(game:GetService("HttpService"):Base64Decode(b64content)))))() -- A robust way to decode
+    local data
+    local success, result = pcall(function()
+        local apiResponse = self.HttpService:JSONDecode(getRes.Body)
+        local rawJson = self.HttpService:Base64Decode(apiResponse.content)
+        return self.HttpService:JSONDecode(rawJson)
+    end)
     
-    local data = (type(rawJson) == "table" and rawJson.commands) and rawJson or { commands = {} }
+    if success and type(result) == "table" and type(result.commands) == "table" then
+        data = result
+    else
+        data = { commands = {} }
+    end
 
-    -- 2. Add the new command
-    table.insert(data.commands, {
-        id = tick(), -- Unique ID for the command
-        cmd = cmdText
-    })
+    table.insert(data.commands, { id = tick(), cmd = cmdText })
 
-    -- 3. Update the remote file
-    if updateRemoteFile(data, "remote cmd: " .. cmdText) then
-        Rayfield:Notify({ Title="Command Queued", Content=cmdText, Duration=3 })
+    if self:_updateRemoteFile(data, "remote cmd: " .. cmdText) then
+        self.Rayfield:Notify({ Title="Command Queued", Content=cmdText, Duration=3 })
+    else
+        self.Rayfield:Notify({ Title="Error", Content="GitHub PUT request failed.", Duration=5 })
     end
 end
 
--- Quick-button definitions
-local QUICK = {
-    { "Kill",    "kill" },
-    { "Reset",   "reset" },
-    { "Jump",    "jump" },
-    { "Fling",   "fling" },
-    { "Trip",    "trip" },
-    { "Bring",   function()
-        local pl = Players.LocalPlayer
-        local hrp = pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
-        if not hrp then return Rayfield:Notify({Title="Error", Content="Cannot get your position.", Duration=3}) end
-        local p = hrp.Position
-        queueCommand(("bring:%.2f,%.2f,%.2f"):format(p.X,p.Y,p.Z))
-    end },
-    { "Rejoin",  "rejoin" },
-    { "Kick",    "kick:You have been kicked!" },
-}
+--- Main initialization function
+function RemoteController:Init()
+    -- Get services
+    self.HttpService = game:GetService("HttpService")
+    self.Players = game:GetService("Players")
+    
+    -- Find the executor's HTTP request function
+    self.request = http_request or request or (syn and syn.request)
+    assert(self.request, "Speaker Error: No valid HTTP request function found.")
 
--- UI
-Tab:CreateInput({
-    Name = "Type command (`kick:reason`)",
-    PlaceholderText = "kill, reset, jump, fling, etc.",
-    RemoveTextAfterFocusLost = false,
-    Callback = queueCommand,
-})
+    -- Safely load the Rayfield library
+    local success, rayfieldLib = pcall(loadstring(game:HttpGet("https://sirius.menu/rayfield")))
+    if not success or not rayfieldLib then
+        warn("Speaker Error: Failed to download or compile Rayfield library.")
+        return
+    end
+    self.Rayfield = rayfieldLib() -- Execute the loaded library to get the object
 
-Tab:CreateButton({
-    Name = "Clear Remote Queue",
-    Callback = function()
-        if updateRemoteFile({ commands = {} }, "clear queue") then
-            Rayfield:Notify({ Title="Success", Content="Remote command queue has been cleared.", Duration=4 })
-        end
-    end,
-})
+    -- Now that the library is loaded, build the UI
+    local Window = self.Rayfield:CreateWindow({ Name = "Speaker Remote Console V3", LoadingTitle = "Ready" })
+    local Tab = Window:CreateTab("Remote Control", 4483362458)
 
-Tab:CreateLabel("Quick Commands")
+    -- UI Elements
+    Tab:CreateInput({
+        Name = "Type command", PlaceholderText = "kill, reset, jump, fling, etc.",
+        RemoveTextAfterFocusLost = false,
+        Callback = function(text) self:QueueCommand(text) end,
+    })
 
-for _, btnInfo in ipairs(QUICK) do
     Tab:CreateButton({
-        Name = "Queue " .. btnInfo[1],
+        Name = "Clear Remote Queue",
         Callback = function()
-            if type(btnInfo[2]) == "string" then
-                queueCommand(btnInfo[2])
-            else
-                btnInfo[2]() -- Handle special cases like 'Bring'
+            if self:_updateRemoteFile({ commands = {} }, "clear queue") then
+                self.Rayfield:Notify({ Title="Success", Content="Remote queue cleared.", Duration=4 })
             end
         end,
     })
+
+    Tab:CreateLabel("Quick Commands")
+
+    local QUICK_COMMANDS = {
+        { "Kill", "kill" }, { "Reset", "reset" }, { "Jump", "jump" }, { "Fling", "fling" }, { "Trip", "trip" },
+        { "Bring", function()
+            local hrp = self.Players.LocalPlayer.Character and self.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then return self.Rayfield:Notify({Title="Error", Content="Cannot get your position.", Duration=3}) end
+            local p = hrp.Position
+            self:QueueCommand(("bring:%.2f,%.2f,%.2f"):format(p.X,p.Y,p.Z))
+        end },
+        { "Rejoin", "rejoin" },
+    }
+
+    for _, btnInfo in ipairs(QUICK_COMMANDS) do
+        Tab:CreateButton({
+            Name = "Queue " .. btnInfo[1],
+            Callback = function()
+                if type(btnInfo[2]) == "string" then self:QueueCommand(btnInfo[2]) else btnInfo[2]() end
+            end,
+        })
+    end
+
+    Tab:CreateButton({
+        Name = "Share Server ID",
+        Callback = function() self:QueueCommand("join:" .. (game.JobId or "")) end,
+    })
 end
 
-Tab:CreateButton({
-    Name = "Share Server ID",
-    Callback = function()
-        queueCommand("join:" .. (game.JobId or ""))
-    end,
-})
+-- Start the controller
+RemoteController:Init()
