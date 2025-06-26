@@ -1,11 +1,11 @@
--- LISTENER (background polling + reset)
+-- REFINED LISTENER (Command Queue Polling)
 
-local HttpService     = game:GetService("HttpService")
-local Players         = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local Players     = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
-local Debris          = game:GetService("Debris")
-local localPlayer     = Players.LocalPlayer
-local request         = http_request or request or (syn and syn.request)
+local Debris      = game:GetService("Debris")
+local localPlayer = Players.LocalPlayer
+local request     = http_request or request or (syn and syn.request)
 assert(request, "No HTTP request function found")
 
 -- pure-Lua Base64 decode
@@ -25,24 +25,6 @@ local function base64decode(data)
     end))
 end
 
--- pure-Lua Base64 encode (for reset)
-local function base64encode(data)
-    return ((data:gsub('.', function(x)
-        local r,bits='', x:byte()
-        for i=8,1,-1 do
-            r = r .. (bits % 2^i - bits % 2^(i-1) > 0 and '1' or '0')
-        end
-        return r
-    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
-        if #x<6 then return '' end
-        local c=0
-        for i=1,6 do
-            c = c + (x:sub(i,i)=='1' and 2^(6-i) or 0)
-        end
-        return b:sub(c+1,c+1)
-    end)..({ '', '==', '=' })[#data%3+1])
-end
-
 -- CONFIG
 local CONFIG = {
     token  = "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",
@@ -51,47 +33,15 @@ local CONFIG = {
     path   = "latest_command.json",
     branch = "main",
 }
-local API_URL = ("https://api.github.com/repos/%s/%s/contents/%s")
-    :format(CONFIG.owner, CONFIG.repo, CONFIG.path)
+local API_URL = ("https://api.github.com/repos/%s/%s/contents/%s?ref=%s")
+    :format(CONFIG.owner, CONFIG.repo, CONFIG.path, CONFIG.branch)
 
--- reset remote JSON to none
-local function resetRemote()
-    local get = request{
-        Url     = API_URL .. "?ref=" .. CONFIG.branch,
-        Method  = "GET",
-        Headers = { Authorization = "token " .. CONFIG.token },
-    }
-    if get.StatusCode ~= 200 then return end
-    local sha = HttpService:JSONDecode(get.Body).sha
-
-    local payload = HttpService:JSONEncode{ cmd="none", timestamp=tick() }
-    local content = base64encode(payload)
-    local body = HttpService:JSONEncode{
-        message = "reset cmd",
-        content = content,
-        sha     = sha,
-        branch  = CONFIG.branch,
-    }
-
-    request{
-        Url     = API_URL,
-        Method  = "PUT",
-        Headers = {
-            Authorization   = "token " .. CONFIG.token,
-            ["Content-Type"]= "application/json",
-        },
-        Body = body,
-    }
-end
-
--- register commands
+-- Command Handlers (no changes needed here)
 local CommandFunctions = {}
 
 CommandFunctions["kill"] = function()
     local c=localPlayer.Character
-    if c and c:FindFirstChild("Humanoid") then
-        c.Humanoid.Health=0
-    end
+    if c and c:FindFirstChild("Humanoid") then c.Humanoid.Health=0 end
 end
 
 CommandFunctions["reset"] = function()
@@ -101,9 +51,7 @@ end
 
 CommandFunctions["jump"] = function()
     local c=localPlayer.Character
-    if c and c:FindFirstChild("Humanoid") then
-        c.Humanoid.Jump=true
-    end
+    if c and c:FindFirstChild("Humanoid") then c.Humanoid.Jump=true end
 end
 
 CommandFunctions["fling"] = function()
@@ -112,8 +60,8 @@ CommandFunctions["fling"] = function()
     local r=c:FindFirstChild("HumanoidRootPart")
     if not r then return end
     local bv=Instance.new("BodyVelocity")
-    bv.MaxForce=Vector3.new(1e5,1e5,1e5)
-    bv.Velocity=Vector3.new(math.random(-100,100),math.random(200,300),math.random(-100,100))
+    bv.MaxForce=Vector3.new(1e6,1e6,1e6)
+    bv.Velocity=Vector3.new(math.random(-150,150),math.random(250,350),math.random(-150,150))
     bv.Parent=r; Debris:AddItem(bv,0.5)
 end
 
@@ -122,16 +70,15 @@ CommandFunctions["trip"] = function()
     if not c or not c.PrimaryPart then return end
     for _,m in ipairs(c:GetDescendants()) do
         if m:IsA("Motor6D") then
-            local a0=Instance.new("Attachment",m.Part0)
-            local a1=Instance.new("Attachment",m.Part1)
+            local a0,a1=Instance.new("Attachment",m.Part0),Instance.new("Attachment",m.Part1)
             local sock=Instance.new("BallSocketConstraint")
-            sock.Attachment0=a0; sock.Attachment1=a1; sock.Parent=c.PrimaryPart
+            sock.Attachment0, sock.Attachment1, sock.Parent=a0, a1, c.PrimaryPart
             m.Enabled=false
         end
     end
     c.PrimaryPart.Velocity=Vector3.new(0,-50,0)
-    delay(2,function()
-        if not c then return end
+    task.delay(2,function()
+        if not c or not c.Parent then return end
         for _,d in ipairs(c:GetDescendants()) do
             if d:IsA("BallSocketConstraint") then d:Destroy()
             elseif d:IsA("Motor6D") then d.Enabled=true end
@@ -142,9 +89,7 @@ end
 CommandFunctions["bring"] = function(arg)
     if type(arg) ~= "string" then return end
     local nums={}
-    for v in arg:gmatch("([^,]+)") do
-        nums[#nums+1]=tonumber(v)
-    end
+    for v in arg:gmatch("([^,]+)") do table.insert(nums, tonumber(v)) end
     if #nums==3 and localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
         localPlayer.Character.HumanoidRootPart.CFrame=CFrame.new(nums[1],nums[2],nums[3])
     end
@@ -160,29 +105,37 @@ CommandFunctions["rejoin"] = function()
     TeleportService:Teleport(game.PlaceId)
 end
 
--- fetch & execute
-local lastTimestamp=0
-spawn(function()
-    while true do
-        local res = request{
-            Url     = API_URL .. "?ref=" .. CONFIG.branch,
-            Method  = "GET",
-            Headers = { Authorization = "token "..CONFIG.token },
-        }
-        if res.StatusCode==200 then
-            local meta=HttpService:JSONDecode(res.Body)
-            local raw=base64decode(meta.content)
-            local ok,p=pcall(HttpService.JSONDecode, HttpService, raw)
-            if ok and p.timestamp and p.cmd then
-                if p.timestamp>lastTimestamp then
-                    lastTimestamp=p.timestamp
-                    local cmd,arg=p.cmd:lower():match("^([^:]+):?(.*)$")
-                    local fn=CommandFunctions[cmd]
-                    if fn then fn(arg) end
-                    resetRemote()
+-- Main polling loop
+local lastProcessedId = 0
+task.spawn(function()
+    while task.wait(2) do -- Increased wait time to reduce API calls
+        local success, res = pcall(function()
+            return request({
+                Url = API_URL,
+                Method = "GET",
+                Headers = { Authorization = "token " .. CONFIG.token },
+            })
+        end)
+
+        if success and res.StatusCode == 200 then
+            local meta = HttpService:JSONDecode(res.Body)
+            local raw = base64decode(meta.content)
+            local ok, data = pcall(HttpService.JSONDecode, HttpService, raw)
+            
+            -- Expecting data in format: { commands = [ {id=..., cmd=...}, ... ] }
+            if ok and type(data) == "table" and type(data.commands) == "table" then
+                for _, commandInfo in ipairs(data.commands) do
+                    if type(commandInfo) == "table" and commandInfo.id > lastProcessedId then
+                        lastProcessedId = commandInfo.id -- Update ID *before* executing
+                        
+                        local cmd, arg = commandInfo.cmd:lower():match("^([^:]+):?(.*)$")
+                        local fn = CommandFunctions[cmd]
+                        if fn then
+                            task.spawn(fn, arg) -- Spawn to prevent one command from blocking others
+                        end
+                    end
                 end
             end
         end
-        wait(1)
     end
 end)
